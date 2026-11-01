@@ -18,6 +18,13 @@ BLANK_LINES = re.compile(r'\n{3,}')
 
 
 def clean_text(text: str) -> str:
+    """
+    claude generated text cleaning function after it went through the wikipedia data.
+    general cleaning of scraped wikipedia pages - some html only things like the 
+    pronunciation of words, etc. are ommitted and thus leave things like empty
+    parentheses; as well, removing tail sections like citations, sources and further
+    linked references.
+    """
     text = TAIL_SECTIONS.sub('', text)
     text = HTML.sub('', text)
     for _ in range(3):
