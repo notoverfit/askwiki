@@ -5,10 +5,8 @@ import torch.nn as nn
 class MultiHeadAttentionDecoder(nn.Module):
     def __init__(self, n_dim: int, n_heads: int):
         super().__init__()
-        if n_dim <= 0 or n_heads <= 0:
-            raise ValueError('MultiHeadAttention: one or more parameters passed in is negative.')
-        elif n_dim % n_heads != 0:
-            raise ValueError('MultiHeadAttention: number of heads is not divisible by the embedding dimension')
+        if n_dim <= 0 or n_heads <= 0: raise ValueError('MultiHeadAttention: one or more parameters passed in is negative.')
+        elif n_dim % n_heads != 0: raise ValueError('MultiHeadAttention: number of heads is not divisible by the embedding dimension')
 
         # linear projection layers to split later
         self.attn_proj = nn.Linear(n_dim, n_dim * 3)
