@@ -29,7 +29,7 @@ class TokenSequence(Dataset):
         chunk = self.data[start_idx:start_idx+self.seq_len+1].astype(self.dtype)
 
         # cast to tensors
-        x = torch.from_numpy(chunk[:-1])
-        y = torch.from_numpy(chunk[1:])
+        x = torch.from_numpy(chunk[:-1].astype(np.int64))
+        y = torch.from_numpy(chunk[1:].astype(np.int64))
 
         return x, y

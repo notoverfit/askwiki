@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import List
 
 @dataclass
 class Config:
@@ -17,6 +18,8 @@ class Config:
     device: str
     epochs: int
     optimiser: str
+    betas: List[float, float]
     batch_size: int
     learning_rate: float
     weight_decay: float
+    accum_steps: int
