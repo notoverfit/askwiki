@@ -8,6 +8,7 @@ import yaml
 import torch
 import numpy as np
 import torch.nn as nn
+import pandas as pd
 
 from datetime import datetime
 from collections import deque
@@ -80,14 +81,20 @@ print_every = 10
 accum_steps = config.accum_steps
 running_count = deque(maxlen=100)
 
-def save_checkpoint(epoch):
+def save_checkpoint(epoch, loss_hist):
     dt_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    # save network weights
     torch.save({
         'epoch': epoch,
         'model': Net.state_dict(),
         'optimiser': Optimiser.state_dict(),
         'config': vars(config)
     }, CHECKPOINT_DIR / f'{config.name}_{dt_str}.pt')
+
+    # save lost hist dataframe
+    loss_df = pd.DataFrame(loss_hist)
+    loss_df.to_csv(f'{CHECKPOINT_DIR}/{config.name}_{dt_str}.csv', index=False)
 
 @torch.no_grad()
 def validate():
@@ -125,21 +132,22 @@ try:
                 # now reset gradients
                 Optimiser.zero_grad(set_to_none=True)
                 step = i // accum_steps
-                loss_hist.append({'epoch': i, 'step': step, 'loss': loss.item(), 'grad_norm': grad_norm.item()})
 
                 running_count.append(loss.item())
+                running_avg = np.mean(running_count)
+                loss_hist.append({'epoch': epoch, 'step': step, 'loss': running_avg, 'grad_norm': grad_norm.item()})
 
                 if step % print_every == 0:
-                    print(f'epoch {epoch} | step {step} | loss {(np.mean(running_count)):.4f} | grad {grad_norm.item():.4f}')
+                    print(f'epoch {epoch}\t|\tstep {step}\t|\tloss {(np.mean(running_avg)):.4f}\t|\tgrad {grad_norm.item():.4f}')
 
         val_loss = validate()
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            save_checkpoint(epoch)
+            save_checkpoint(epoch, loss_hist)
 
 except KeyboardInterrupt as e:
     print('Exiting training...')
-    save_checkpoint(epoch)
+    save_checkpoint(epoch, loss_hist)
 except Exception as e:
-    save_checkpoint(epoch)
+    save_checkpoint(epoch, loss_hist)
     raise e
