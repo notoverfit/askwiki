@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import List
-from src.askwiki.model.modules.block import TransformerBlock
+from askwiki.model.modules.block import TransformerBlock
 
 class TransformerNet(nn.Module):
     def __init__(self, n_dim: int, n_heads: List[int], mlp_dim: List[int]):

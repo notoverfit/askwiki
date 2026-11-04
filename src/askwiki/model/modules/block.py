@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from src.askwiki.model.modules.attention import MultiHeadAttentionDecoder
+from askwiki.model.modules.attention import MultiHeadAttentionDecoder
 
 class TransformerBlock(nn.Module):
     def __init__(self, n_dim: int, n_heads: int, mlp_dim: int):

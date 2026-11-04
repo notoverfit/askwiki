@@ -16,7 +16,7 @@ dependencies = [
     "pyarrow>=26.0.0",
     "pyprojroot>=0.3.0",
     "tokenizers>=0.23.3",
-    "torch>=2.15.0",
+    "torch>=2.11.0",
     "transformers>=5.22.1",
 ]
 
@@ -32,3 +32,10 @@ dev = [
     "ipykernel>=7.4.0",
     "jupyter>=1.1.1",
 ]
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu128"
