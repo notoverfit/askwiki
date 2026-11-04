@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+src/askwiki/training/checkpoints
+src/askwiki/training/configs
+
 # Distribution / packaging
 .Python
 build/
