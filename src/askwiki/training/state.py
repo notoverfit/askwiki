@@ -10,7 +10,7 @@ class State:
     net: torch.nn.Module
     optimiser: torch.optim.Optimizer
     scaler: torch.amp.GradScaler
-    loss_fun: torch.nn.CrossEntropyLoss
+    loss_fn: torch.nn.CrossEntropyLoss
     device: torch.device
     train_data: TokenSequence
     val_data: TokenSequence

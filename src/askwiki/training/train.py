@@ -44,7 +44,7 @@ CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 # load in config and config params
 
 config_path = f'{CONFIG_PATH}/base.yaml'
-from_checkpoint=False
+from_checkpoint = True
 
 try:
     with open(config_path, 'r') as file:
@@ -78,20 +78,36 @@ def generate_state(config: Config) -> State:
         device=device
     )
 
-def save_checkpoint(state: State) -> None:
-    state_dict = state.state_dict()
-    torch.save(state_dict, f'{CHECKPOINT_DIR}/{state.config.name}_latest.pt')
+def save_checkpoint(state: State, kind: str = 'latest') -> None:
+    path = CHECKPOINT_DIR / f'{state.config.name}_{kind}.pt'
+    tmp_path = path.with_name(path.name + '.tmp')
+
+    torch.save(state.state_dict(), tmp_path)
+    os.replace(tmp_path, path)
 
 def load_checkpoint(state: State, config: Config) -> State:
     path = f'{CHECKPOINT_DIR}/{config.name}_latest.pt'
     if not os.path.exists(path):
         raise ValueError(f'checkpoint for config {config.name} does not exist at {path}.')
 
-    state_dict = torch.load(path)
+    state_dict = torch.load(path, map_location=state.device)
     state.load_state_dict(state_dict)
 
-# train loop
+@torch.no_grad()
+def validate(state: State, loader: DataLoader) -> float:
+    state.net.eval()
+    total_loss, total_tokens = 0.0, 0
+    for X_val, y_val in loader:
+        X_val, y_val = X_val.to(state.device), y_val.to(state.device)
+        with torch.autocast(device_type=state.device.type, dtype=torch.float16):
+            logits = state.net(X_val)
+            loss = state.loss_fn(logits.reshape(-1, logits.size(-1)), y_val.reshape(-1))
+        total_loss += loss.item() * y_val.numel()
+        total_tokens += y_val.numel()
+    state.net.train()
+    return total_loss / total_tokens
 
+# train loop
 state = generate_state(config)
 if from_checkpoint: load_checkpoint(state, config)
 
@@ -104,12 +120,61 @@ running_count = deque(maxlen=100)
 
 try:
     for epoch in range(state.epoch, config.epochs):
-        train_subset = DataLoader(Subset(state.train_data, range(state.batch_idx, len(state.train_data))))
-        for i, (X_tr, y_tr) in enumerate(train_subset, start=1):
-            state.optimiser.zero_grad()
-            
-    pass
+        # sampling which allows the training step to safely skip samples for the initial epoch of a checkpoint that has been continued
+        # sample takes a subsample of a given dataset from the given range. batch_idx should be reset to 0 after every epoch so is safe for runs
+        start_sample = state.batch_idx * config.batch_size
+        remaining = Subset(state.train_data, range(start_sample, len(state.train_data)))
+        loader = DataLoader(remaining, config.batch_size)
+
+        for i, (X_tr, y_tr) in enumerate(loader, start=state.batch_idx + 1):
+            X_tr, y_tr = X_tr.to(state.device), y_tr.to(state.device)
+
+            # mixed precision for faster compute
+            with torch.autocast(device_type=state.device.type, dtype=torch.float16):
+                logits = state.net(X_tr)
+                loss = state.loss_fn(logits.reshape(-1, logits.size(-1)), y_tr.reshape(-1))
+
+            # average the loss by the accumulation steps
+            state.scaler.scale(loss / accum_steps).backward()
+
+            if i % accum_steps == 0 or i == len(loader):
+                state.scaler.unscale_(state.optimiser)
+                grad_norm = nn.utils.clip_grad_norm_(state.net.parameters(), max_norm=1)
+                state.scaler.step(state.optimiser)
+                state.scaler.update()
+                state.optimiser.zero_grad(set_to_none=True)
+
+                # grad_accum steps done, so we can checkpoint from here
+                # step is defined by the number of accum steps we have gone through
+                state.batch_idx = i
+                step = i // accum_steps
+
+                running_count.append(loss.item())
+                running_avg = float(np.mean(running_count))
+                state.loss_hist.append({
+                    'epoch': epoch,
+                    'step': step,
+                    'loss': running_avg,
+                    'grad_norm': grad_norm.item()
+                })
+
+                if step % print_every == 0:
+                    print(f'epoch {epoch}\t| step {step}\t| loss {running_avg:.4f}\t| grad {grad_norm.item():.4f}')
+
+        val_loss = validate(state, ValLoader)
+        print(f'epoch {epoch} done\t|\tval loss {val_loss:.4f}')
+
+        state.epoch += 1
+        state.batch_idx = 0
+
+        if val_loss < state.best_val_loss:
+            state.best_val_loss = val_loss
+            save_checkpoint(state, 'best')
+        save_checkpoint(state)
+
 except KeyboardInterrupt:
-    pass
-finally:
-    pass
+    print('Exiting training, saving checkpoint...')
+    save_checkpoint(state)
+except Exception:
+    save_checkpoint(state, 'crash')
+    raise
