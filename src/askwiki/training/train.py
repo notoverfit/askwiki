@@ -126,10 +126,16 @@ try:
         remaining = Subset(state.train_data, range(start_sample, len(state.train_data)))
         loader = DataLoader(remaining, config.batch_size)
 
+        # training with scaling works by; scaled(logits + loss) to unscale grads to normalise grad to backprop
         for i, (X_tr, y_tr) in enumerate(loader, start=state.batch_idx + 1):
             X_tr, y_tr = X_tr.to(state.device), y_tr.to(state.device)
 
-            # mixed precision for faster compute
+            # automatic mixed precision. so notes for my learning sake
+            # by default, tensors are stored in fp32 and thus operations on tensors are done in fp32.
+            # fp16 by nature is half the size (bits) of fp32. gpus can compute fp16 operations at
+            # much high throughput and speed than fp16; more than the 2x drop in precision
+            # wrapping the loss in autocast does not store the tensors in fp32, rather, the tensors
+            # are copied into fp16 temporarily for matrix operations.
             with torch.autocast(device_type=state.device.type, dtype=torch.float16):
                 logits = state.net(X_tr)
                 loss = state.loss_fn(logits.reshape(-1, logits.size(-1)), y_tr.reshape(-1))
@@ -138,9 +144,23 @@ try:
             state.scaler.scale(loss / accum_steps).backward()
 
             if i % accum_steps == 0 or i == len(loader):
+                # scalers scale up the tensor magnitudes as the loss in precision can cause tensors
+                # to become 0, that have information in them. before we propagate the weight updates,
+                # we need to unscale them to their original precision.
                 state.scaler.unscale_(state.optimiser)
+
+                # gradient normalisation tries to solve the exploding gradient problem. it ensures that
+                # the sum of the l1 norms of the gradients sum to 1
                 grad_norm = nn.utils.clip_grad_norm_(state.net.parameters(), max_norm=1)
+
+                # update the actual weights of the network
                 state.scaler.step(state.optimiser)
+
+                # the amp scaler doesn't scale at a fixed factor, but rather starts at a base level and then
+                # increases and decreases as required. since fp16 can only hold a set range of values, 
+                # if the float overflows, it becomes represented as infinity. if infinity is detected, then
+                # the scaler "backs off" by 0.5x on default. otherwise, the scaler attempts to keep growing
+                # the scale to ensure that it preserves as many digits of precision as possible.
                 state.scaler.update()
                 state.optimiser.zero_grad(set_to_none=True)
 
@@ -151,15 +171,9 @@ try:
 
                 running_count.append(loss.item())
                 running_avg = float(np.mean(running_count))
-                state.loss_hist.append({
-                    'epoch': epoch,
-                    'step': step,
-                    'loss': running_avg,
-                    'grad_norm': grad_norm.item()
-                })
+                state.loss_hist.append({'epoch': epoch, 'step': step, 'loss': running_avg, 'grad_norm': grad_norm.item()})
 
-                if step % print_every == 0:
-                    print(f'epoch {epoch}\t| step {step}\t| loss {running_avg:.4f}\t| grad {grad_norm.item():.4f}')
+                if step % print_every == 0: print(f'epoch {epoch}\t| step {step}\t| loss {running_avg:.4f}\t| grad {grad_norm.item():.4f}')
 
         val_loss = validate(state, ValLoader)
         print(f'epoch {epoch} done\t|\tval loss {val_loss:.4f}')
