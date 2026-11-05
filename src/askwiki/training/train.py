@@ -13,8 +13,9 @@ import pandas as pd
 from datetime import datetime
 from collections import deque
 from pathlib import Path
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from askwiki.model.nets.net import TransformerNet
+from askwiki.training.state import State
 from askwiki.training.config import Config
 from askwiki.data.classes.token import TokenSequence
 from dotenv import load_dotenv
@@ -43,6 +44,7 @@ CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 # load in config and config params
 
 config_path = f'{CONFIG_PATH}/base.yaml'
+from_checkpoint=False
 
 try:
     with open(config_path, 'r') as file:
@@ -59,95 +61,55 @@ except Exception as e:
 if config.optimiser not in OPTIMISER_MAP.keys():
     raise ValueError(f'{config.optimiser} is not a valid optimiser.')
 
-device = torch.device(config.device)
+# util functions
 
-# all the stuff you need for training
-Optim = OPTIMISER_MAP[config.optimiser]
-Net = TransformerNet(vocab_size=config.vocab_size, n_dim=config.emb_dim, seq_len=config.seq_len, n_heads=[config.n_heads] * config.num_blocks, mlp_dim=[config.mlp_dim] * config.num_blocks).to(device)
-Optimiser = Optim(Net.parameters(), lr=config.learning_rate, betas=config.betas, weight_decay=config.weight_decay)
-Scaler = torch.amp.GradScaler(config.device)
-Loss = nn.CrossEntropyLoss()
+def generate_state(config: Config) -> State:
+    device = torch.device(config.device)
+    net = TransformerNet(vocab_size=config.vocab_size, n_dim=config.emb_dim, seq_len=config.seq_len, n_heads=[config.n_heads] * config.num_blocks, mlp_dim=[config.mlp_dim] * config.num_blocks).to(device)
+    Optim = OPTIMISER_MAP[config.optimiser]
+    return State(
+        net=net,
+        optimiser=Optim(net.parameters(), lr=config.learning_rate, betas=config.betas, weight_decay=config.weight_decay),
+        scaler=torch.amp.GradScaler(config.device),
+        loss_fn=nn.CrossEntropyLoss(),
+        train_data=TokenSequence(config.train_data, dtype=np.uint16, seq_len=config.seq_len),
+        val_data=TokenSequence(config.val_data, dtype=np.uint16, seq_len=config.seq_len),
+        config=config,
+        device=device
+    )
 
-TrainData = TokenSequence(config.train_data, dtype=np.uint16, seq_len=config.seq_len)
-ValData = TokenSequence(config.val_data, dtype=np.uint16, seq_len=config.seq_len)
-TrainLoader = DataLoader(TrainData, config.batch_size)
-ValLoader = DataLoader(ValData, config.batch_size)
+def save_checkpoint(state: State) -> None:
+    state_dict = state.state_dict()
+    torch.save(state_dict, f'{CHECKPOINT_DIR}/{state.config.name}_latest.pt')
 
-Net.train()
-loss_hist = []
-best_val_loss = float('inf')
-today = datetime.now()
+def load_checkpoint(state: State, config: Config) -> State:
+    path = f'{CHECKPOINT_DIR}/{config.name}_latest.pt'
+    if not os.path.exists(path):
+        raise ValueError(f'checkpoint for config {config.name} does not exist at {path}.')
+
+    state_dict = torch.load(path)
+    state.load_state_dict(state_dict)
+
+# train loop
+
+state = generate_state(config)
+if from_checkpoint: load_checkpoint(state, config)
+
+ValLoader = DataLoader(state.val_data, config.batch_size)
+
+state.net.train()
 print_every = 10
 accum_steps = config.accum_steps
 running_count = deque(maxlen=100)
 
-def save_checkpoint(epoch, loss_hist):
-    dt_str = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-    # save network weights
-    torch.save({
-        'epoch': epoch,
-        'model': Net.state_dict(),
-        'optimiser': Optimiser.state_dict(),
-        'config': vars(config)
-    }, CHECKPOINT_DIR / f'{config.name}_{dt_str}.pt')
-
-    # save lost hist dataframe
-    loss_df = pd.DataFrame(loss_hist)
-    loss_df.to_csv(f'{CHECKPOINT_DIR}/{config.name}_{dt_str}.csv', index=False)
-
-@torch.no_grad()
-def validate():
-    Net.eval()
-    total_loss, total_tokens = 0.0, 0
-    for X_val, y_val in ValLoader:
-        X_val, y_val = X_val.to(device), y_val.to(device)
-        with torch.autocast(device_type=device.type, dtype=torch.float16):
-            logits = Net(X_val)
-            loss = Loss(logits.reshape(-1, config.vocab_size), y_val.reshape(-1))
-        total_loss += loss.item() * y_val.numel()
-        total_tokens += y_val.numel()
-    Net.train()
-    return total_loss / total_tokens
-
-epoch = 0
 try:
-    for epoch in range(config.epochs):
-        for i, (X_tr, y_tr) in enumerate(TrainLoader, start=1):
-            X_tr, y_tr = X_tr.to(device), y_tr.to(device)
-
-            with torch.autocast(device_type=config.device, dtype=torch.float16):
-                logits = Net(X_tr)
-                loss = Loss(logits.reshape(-1, config.vocab_size), y_tr.reshape(-1))
-
-            # average the loss by the accumulation steps
-            Scaler.scale(loss / accum_steps).backward()
-
-            if i % accum_steps == 0 or i == len(TrainLoader):
-                Scaler.unscale_(Optimiser)
-                grad_norm = nn.utils.clip_grad_norm_(Net.parameters(), max_norm=1)
-                Scaler.step(Optimiser)
-                Scaler.update()
-
-                # now reset gradients
-                Optimiser.zero_grad(set_to_none=True)
-                step = i // accum_steps
-
-                running_count.append(loss.item())
-                running_avg = np.mean(running_count)
-                loss_hist.append({'epoch': epoch, 'step': step, 'loss': running_avg, 'grad_norm': grad_norm.item()})
-
-                if step % print_every == 0:
-                    print(f'epoch {epoch}\t|\tstep {step}\t|\tloss {(np.mean(running_avg)):.4f}\t|\tgrad {grad_norm.item():.4f}')
-
-        val_loss = validate()
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            save_checkpoint(epoch, loss_hist)
-
-except KeyboardInterrupt as e:
-    print('Exiting training...')
-    save_checkpoint(epoch, loss_hist)
-except Exception as e:
-    save_checkpoint(epoch, loss_hist)
-    raise e
+    for epoch in range(state.epoch, config.epochs):
+        train_subset = DataLoader(Subset(state.train_data, range(state.batch_idx, len(state.train_data))))
+        for i, (X_tr, y_tr) in enumerate(train_subset, start=1):
+            state.optimiser.zero_grad()
+            
+    pass
+except KeyboardInterrupt:
+    pass
+finally:
+    pass
