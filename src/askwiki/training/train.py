@@ -14,12 +14,15 @@ from datetime import datetime
 from collections import deque
 from pathlib import Path
 from torch.utils.data import DataLoader, Subset
+from dotenv import load_dotenv
+from torch.optim import AdamW
+
+from askwiki.training.utils import generate_state
 from askwiki.model.nets.net import TransformerNet
 from askwiki.training.state import State
 from askwiki.training.config import Config
 from askwiki.data.classes.token import TokenSequence
-from dotenv import load_dotenv
-from torch.optim import AdamW
+
 
 load_dotenv()
 
@@ -63,21 +66,6 @@ if config.optimiser not in OPTIMISER_MAP.keys():
 
 # util functions
 
-def generate_state(config: Config) -> State:
-    device = torch.device(config.device)
-    net = TransformerNet(vocab_size=config.vocab_size, n_dim=config.emb_dim, seq_len=config.seq_len, n_heads=[config.n_heads] * config.num_blocks, mlp_dim=[config.mlp_dim] * config.num_blocks).to(device)
-    Optim = OPTIMISER_MAP[config.optimiser]
-    return State(
-        net=net,
-        optimiser=Optim(net.parameters(), lr=config.learning_rate, betas=config.betas, weight_decay=config.weight_decay),
-        scaler=torch.amp.GradScaler(config.device),
-        loss_fn=nn.CrossEntropyLoss(),
-        train_data=TokenSequence(config.train_data, dtype=np.uint16, seq_len=config.seq_len),
-        val_data=TokenSequence(config.val_data, dtype=np.uint16, seq_len=config.seq_len),
-        config=config,
-        device=device
-    )
-
 def save_checkpoint(state: State, kind: str = 'latest') -> None:
     path = CHECKPOINT_DIR / f'{state.config.name}_{kind}.pt'
     tmp_path = path.with_name(path.name + '.tmp')
@@ -108,7 +96,7 @@ def validate(state: State, loader: DataLoader) -> float:
     return total_loss / total_tokens
 
 # train loop
-state = generate_state(config)
+state = generate_state(config, OPTIMISER_MAP)
 if from_checkpoint: load_checkpoint(state, config)
 
 ValLoader = DataLoader(state.val_data, config.batch_size)
