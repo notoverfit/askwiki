@@ -17,11 +17,9 @@ from torch.utils.data import DataLoader, Subset
 from dotenv import load_dotenv
 from torch.optim import AdamW
 
-from askwiki.training.utils import generate_state
-from askwiki.model.nets.net import TransformerNet
+from askwiki.training.utils import generate_state, validate
 from askwiki.training.state import State
 from askwiki.training.config import Config
-from askwiki.data.classes.token import TokenSequence
 
 
 load_dotenv()
@@ -80,20 +78,6 @@ def load_checkpoint(state: State, config: Config) -> State:
 
     state_dict = torch.load(path, map_location=state.device)
     state.load_state_dict(state_dict)
-
-@torch.no_grad()
-def validate(state: State, loader: DataLoader) -> float:
-    state.net.eval()
-    total_loss, total_tokens = 0.0, 0
-    for X_val, y_val in loader:
-        X_val, y_val = X_val.to(state.device), y_val.to(state.device)
-        with torch.autocast(device_type=state.device.type, dtype=torch.float16):
-            logits = state.net(X_val)
-            loss = state.loss_fn(logits.reshape(-1, logits.size(-1)), y_val.reshape(-1))
-        total_loss += loss.item() * y_val.numel()
-        total_tokens += y_val.numel()
-    state.net.train()
-    return total_loss / total_tokens
 
 # train loop
 state = generate_state(config, OPTIMISER_MAP)
