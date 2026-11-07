@@ -1,12 +1,13 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 @dataclass
 class Config:
     # data paths
     name: str
     train_data: str
-    val_data: str
+    # empty value ('' or blank) skips validation
+    val_data: Optional[str]
     # model config
     seq_len: int
     vocab_size: int

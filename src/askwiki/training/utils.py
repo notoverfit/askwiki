@@ -18,7 +18,7 @@ def generate_state(config: Config, optim_map: dict) -> State:
         scaler=torch.amp.GradScaler(config.device),
         loss_fn=nn.CrossEntropyLoss(),
         train_data=TokenSequence(config.train_data, dtype=np.uint16, seq_len=config.seq_len),
-        val_data=TokenSequence(config.val_data, dtype=np.uint16, seq_len=config.seq_len),
+        val_data=TokenSequence(config.val_data, dtype=np.uint16, seq_len=config.seq_len) if config.val_data else None,
         config=config,
         device=device
     )

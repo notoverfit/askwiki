@@ -83,7 +83,8 @@ def load_checkpoint(state: State, config: Config) -> State:
 state = generate_state(config, OPTIMISER_MAP)
 if from_checkpoint: load_checkpoint(state, config)
 
-ValLoader = DataLoader(state.val_data, config.batch_size)
+ValLoader = DataLoader(state.val_data, config.batch_size) if state.val_data is not None else None
+if ValLoader is None: print('no val_data given, skipping validation')
 
 state.net.train()
 print_every = 10
@@ -147,13 +148,18 @@ try:
 
                 if step % print_every == 0: print(f'epoch {epoch}\t| step {step}\t| loss {running_avg:.4f}\t| grad {grad_norm.item():.4f}')
 
-        val_loss = validate(state, ValLoader)
-        print(f'epoch {epoch} done\t|\tval loss {val_loss:.4f}')
+        # for training only runs
+        if ValLoader is not None:
+            val_loss = validate(state, ValLoader)
+            print(f'epoch {epoch} done\t|\tval loss {val_loss:.4f}')
+        else:
+            val_loss = None
+            print(f'epoch {epoch} done')
 
         state.epoch += 1
         state.batch_idx = 0
 
-        if val_loss < state.best_val_loss:
+        if val_loss is not None and val_loss < state.best_val_loss:
             state.best_val_loss = val_loss
             save_checkpoint(state, 'best')
         save_checkpoint(state)

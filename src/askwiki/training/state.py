@@ -1,6 +1,6 @@
 import torch
 
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 from dataclasses import dataclass, field, asdict
 from askwiki.data.classes.token import TokenSequence
 from askwiki.training.config import Config
@@ -13,7 +13,7 @@ class State:
     loss_fn: torch.nn.CrossEntropyLoss
     device: torch.device
     train_data: TokenSequence
-    val_data: TokenSequence
+    val_data: Optional[TokenSequence]
     config: Config
     epoch: int = 0
     # next batch to run, aligned to the last optimiser step
