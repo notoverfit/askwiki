@@ -79,7 +79,7 @@ Pre-training ran for about three days (~96k steps). I stopped it once the loss s
 
 Loss falls quickly from ~10 to ~3.5 in the first 10k steps, then slowly flattens to just above 3. Over the run the rolling gradient norm drifts up from ~0.55 to ~0.7, but it stays within a narrow range.
 
-The odd part is around step 60k. Loss briefly drops below 2 while the gradient norm first spikes and then collapses. My best guess is a run of duplicated or degenerate text in the data that the model could briefly memorise. The run recovers immediately afterwards, but I'd like to find the exact shard.
+The odd part is around step 60k. Loss briefly drops below 2 while the gradient norm first spikes and then collapses. My best guess is a run of duplicated or degenerate text in the data that the model could briefly memorise.
 
 | | Loss |
 |---|---:|
@@ -114,7 +114,7 @@ Loss goes from ~3.6 to ~2.0 and is still falling at the end. There are visible s
 
 Here is a comparison on prompts the model never saw. The base model gets the same `user: ... assistant:` prefix but has never seen that format. I sampled the base model at T=1.0 because it falls into repetition loops at lower temperatures; the SFT model is at T=0.5.
 
-| Prompt | Base model (truncated) | SFT model |
+| Prompt | Pre-trained model | SFT model |
 |---|---|---|
 | What is the capital of France? | *René Corot, not a minister. In 1998 in Legio XII, he shouted to his press…* | Paris. |
 | Who was Isaac Newton? | *Anosyntaph. Toddrai Watts: Sext fighting: Dartfield thanAR…* | Isaac Newton (also spelled Isaac Newton) was an English priest who was born in 1653. |
