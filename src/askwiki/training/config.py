@@ -24,3 +24,8 @@ class Config:
     learning_rate: float
     weight_decay: float
     accum_steps: int
+    # optional path to a checkpoint (.pt) whose model weights initialise the network.
+    # only the weights are taken: optimiser, scaler and epoch/batch progress start fresh,
+    # so the run can use a different dataset (e.g. sft on top of a pretrained net).
+    # empty value ('' or blank) trains from scratch.
+    base_model: Optional[str] = None

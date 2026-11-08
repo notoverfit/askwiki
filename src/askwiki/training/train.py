@@ -44,8 +44,8 @@ CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 
 # load in config and config params
 
-config_path = f'{CONFIG_PATH}/base.yaml'
-from_checkpoint = True
+config_path = f'{CONFIG_PATH}/sft.yaml'
+from_checkpoint = False
 
 try:
     with open(config_path, 'r') as file:
@@ -79,9 +79,21 @@ def load_checkpoint(state: State, config: Config) -> State:
     state_dict = torch.load(path, map_location=state.device)
     state.load_state_dict(state_dict)
 
+def load_base_model(state: State, path: str) -> None:
+    # weights only; optimiser, scaler and progress stay fresh for the new dataset
+    path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        raise ValueError(f'base model checkpoint does not exist at {path}.')
+
+    state_dict = torch.load(path, map_location=state.device)
+    state.net.load_state_dict(state_dict['model'])
+    print(f'initialised network weights from base model at {path}')
+
 # train loop
 state = generate_state(config, OPTIMISER_MAP)
+# resuming a run takes precedence: its checkpoint already holds the fine-tuned weights
 if from_checkpoint: load_checkpoint(state, config)
+elif config.base_model: load_base_model(state, config.base_model)
 
 ValLoader = DataLoader(state.val_data, config.batch_size) if state.val_data is not None else None
 if ValLoader is None: print('no val_data given, skipping validation')

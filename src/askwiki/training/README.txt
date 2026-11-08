@@ -35,4 +35,9 @@ config:
   learning_rate: 0.0003
   weight_decay: 0.01
   accum_steps: 8
+
+  # optional: start from another run's weights (e.g. sft on a pretrained net).
+  # only the model weights are loaded; optimiser and progress start fresh.
+  # model config above must match the base model. leave blank to train from scratch.
+  base_model: '~/path/to/checkpoints/base_best.pt'
 ```
