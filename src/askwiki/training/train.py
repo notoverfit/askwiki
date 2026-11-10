@@ -10,7 +10,6 @@ import numpy as np
 import torch.nn as nn
 import pandas as pd
 
-from datetime import datetime
 from collections import deque
 from pathlib import Path
 from torch.utils.data import DataLoader, Subset
@@ -20,7 +19,7 @@ from torch.optim import AdamW
 from askwiki.training.utils import generate_state, validate
 from askwiki.training.state import State
 from askwiki.training.config import Config
-
+from askwiki.model.modules.lora import LoRALinear
 
 load_dotenv()
 
@@ -44,7 +43,7 @@ CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 
 # load in config and config params
 
-config_path = f'{CONFIG_PATH}/sft.yaml'
+config_path = f'{CONFIG_PATH}/lora.yaml'
 from_checkpoint = False
 
 try:
@@ -91,9 +90,22 @@ def load_base_model(state: State, path: str) -> None:
 
 # train loop
 state = generate_state(config, OPTIMISER_MAP)
+
 # resuming a run takes precedence: its checkpoint already holds the fine-tuned weights
 if from_checkpoint: load_checkpoint(state, config)
 elif config.base_model: load_base_model(state, config.base_model)
+
+# if there is a lora config, we need to attach the lora linear modules
+if config.lora_r:
+    for p in state.net.parameters(): p.requires_grad = False
+    for module in list(state.net.modules()):
+        for child_name, child in list(module.named_children()):
+            if isinstance(child, nn.Linear) and child_name in config.lora_targets:
+                setattr(module, child_name, LoRALinear(child, config.lora_r, config.lora_alpha))
+
+    state.net.to(state.device)
+    trainable = [p for p in state.net.parameters() if p.requires_grad]
+    state.optimiser = OPTIMISER_MAP[config.optimiser](trainable, lr=config.learning_rate, weight_decay=config.weight_decay)
 
 ValLoader = DataLoader(state.val_data, config.batch_size) if state.val_data is not None else None
 if ValLoader is None: print('no val_data given, skipping validation')

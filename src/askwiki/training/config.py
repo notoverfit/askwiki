@@ -24,6 +24,10 @@ class Config:
     learning_rate: float
     weight_decay: float
     accum_steps: int
+    # lora config
+    lora_r: Optional[int]
+    lora_alpha: Optional[int]
+    lora_targets: Optional[List[str]]
     # optional path to a checkpoint (.pt) whose model weights initialise the network.
     # only the weights are taken: optimiser, scaler and epoch/batch progress start fresh,
     # so the run can use a different dataset (e.g. sft on top of a pretrained net).
